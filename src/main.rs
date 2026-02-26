@@ -423,6 +423,7 @@ mod tests {
             cols: 120,
             rows: 60,
             format: vec![OutputFormat::Mp4],
+            quiet: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
@@ -439,6 +440,7 @@ mod tests {
             cols: 120,
             rows: 60,
             format: vec![OutputFormat::Mp4],
+            quiet: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
@@ -455,6 +457,7 @@ mod tests {
             cols: 120,
             rows: 60,
             format: vec![OutputFormat::Mp4],
+            quiet: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
