@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
@@ -11,17 +10,15 @@ use shell_escape::escape;
 #[command(author, version, about)]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Subcommand,
 }
 
 #[derive(Subcommand, Debug)]
-enum Command {
+enum Subcommand {
     /// Record an interactive command
     Record(RecordArgs),
     /// Check dependencies for requested output formats
     Check(CheckArgs),
-    /// Print version information
-    Version,
 }
 
 #[derive(Args, Debug)]
@@ -59,6 +56,10 @@ struct RecordArgs {
     #[arg(long, value_delimiter = ',', default_value = "mp4")]
     format: Vec<OutputFormat>,
 
+    /// Suppress summary output
+    #[arg(long)]
+    quiet: bool,
+
     /// Command to exec and record. Use `--` before the command.
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
@@ -73,7 +74,7 @@ struct CheckArgs {
     format: Vec<OutputFormat>,
 }
 
-#[derive(Clone, Debug, ValueEnum, PartialEq, Eq)]
+#[derive(Clone, Debug, ValueEnum, PartialEq, Eq, Hash)]
 enum OutputFormat {
     Cast,
     Txt,
@@ -86,12 +87,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Record(args) => record(args),
-        Command::Check(args) => check(args),
-        Command::Version => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
-            Ok(())
-        }
+        Subcommand::Record(args) => record(args),
+        Subcommand::Check(args) => check(args),
     }
 }
 
@@ -101,19 +98,17 @@ fn record(args: RecordArgs) -> Result<()> {
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("create out dir {}", out_dir.display()))?;
 
-    let formats = normalize_formats(&args.format);
+    let formats = args.format.clone();
     require_tools_for_formats(&formats)?;
 
-    let cast_file = out_dir.join(format!("{}.cast", base_name));
-    let txt_file = out_dir.join(format!("{}.txt", base_name));
-    let raw_file = out_dir.join(format!("{}.raw.log", base_name));
-    let gif_file = out_dir.join(format!("{}.gif", base_name));
-    let mp4_file = out_dir.join(format!("{}.mp4", base_name));
+    let cast_file = out_dir.join(format!("{}.{}", base_name, OutputFormat::Cast.extension()));
+    let outputs = OutputPaths::new(&out_dir, &base_name);
 
     let cmd_str = shell_join(&args.cmd);
     let rec_cmd = if formats.contains(&OutputFormat::Raw) {
-        let raw_path = shell_escape_path(&raw_file);
-        format!("script -q -f -c {} {}", cmd_str, raw_path)
+        let raw_path = shell_escape_path(outputs.path(OutputFormat::Raw).as_path());
+        let cmd_arg = shell_escape_str(&cmd_str);
+        format!("script -q -f -c {} {}", cmd_arg, raw_path)
     } else {
         cmd_str
     };
@@ -121,10 +116,7 @@ fn record(args: RecordArgs) -> Result<()> {
     run_status(
         Command::new("asciinema")
             .arg("rec")
-            .arg("--cols")
-            .arg(args.cols.to_string())
-            .arg("--rows")
-            .arg(args.rows.to_string())
+            .args(geometry_args(args.cols, args.rows))
             .arg("-c")
             .arg(rec_cmd)
             .arg(&cast_file),
@@ -138,7 +130,7 @@ fn record(args: RecordArgs) -> Result<()> {
                 .arg("-f")
                 .arg("txt")
                 .arg(&cast_file)
-                .arg(&txt_file),
+                .arg(outputs.path(OutputFormat::Txt)),
             "asciinema convert txt",
         )?;
     }
@@ -146,10 +138,9 @@ fn record(args: RecordArgs) -> Result<()> {
     if formats.contains(&OutputFormat::Gif) || formats.contains(&OutputFormat::Mp4) {
         run_status(
             Command::new("agg")
-                .arg("--cols")
-                .arg(args.cols.to_string())
+                .args(geometry_args(args.cols, args.rows))
                 .arg(&cast_file)
-                .arg(&gif_file),
+                .arg(outputs.path(OutputFormat::Gif)),
             "agg",
         )?;
     }
@@ -159,53 +150,50 @@ fn record(args: RecordArgs) -> Result<()> {
             Command::new("ffmpeg")
                 .arg("-y")
                 .arg("-i")
-                .arg(&gif_file)
+                .arg(outputs.path(OutputFormat::Gif))
                 .arg("-movflags")
                 .arg("faststart")
                 .arg("-pix_fmt")
                 .arg("yuv420p")
-                .arg(&mp4_file),
+                .arg(outputs.path(OutputFormat::Mp4)),
             "ffmpeg",
         )?;
     }
 
     if !formats.contains(&OutputFormat::Gif) && formats.contains(&OutputFormat::Mp4) {
-        let _ = std::fs::remove_file(&gif_file);
+        let _ = std::fs::remove_file(outputs.path(OutputFormat::Gif));
+    }
+    if !formats.contains(&OutputFormat::Cast) {
+        let _ = std::fs::remove_file(&cast_file);
     }
 
-    eprintln!("Done:");
-    eprintln!("- asciinema: {}", cast_file.display());
-    if formats.contains(&OutputFormat::Txt) {
-        eprintln!("- text log:  {}", txt_file.display());
-    }
-    if formats.contains(&OutputFormat::Raw) {
-        eprintln!("- raw log:   {}", raw_file.display());
-    }
-    if formats.contains(&OutputFormat::Gif) {
-        eprintln!("- gif:       {}", gif_file.display());
-    }
-    if formats.contains(&OutputFormat::Mp4) {
-        eprintln!("- mp4:       {}", mp4_file.display());
+    if !args.quiet {
+        eprintln!("Done:");
+        let mut printed = std::collections::HashSet::new();
+        for format in &formats {
+            if !printed.insert(*format) {
+                continue;
+            }
+            if *format == OutputFormat::Cast {
+                eprintln!("- cast:      {}", cast_file.display());
+                continue;
+            }
+            eprintln!(
+                "- {}: {}",
+                format.label(),
+                outputs.path(*format).display()
+            );
+        }
     }
 
     Ok(())
 }
 
 fn check(args: CheckArgs) -> Result<()> {
-    let formats = normalize_formats(&args.format);
+    let formats = args.format.clone();
     require_tools_for_formats(&formats)?;
     println!("OK");
     Ok(())
-}
-
-fn normalize_formats(formats: &[OutputFormat]) -> Vec<OutputFormat> {
-    let mut out = Vec::new();
-    for f in formats {
-        if !out.contains(f) {
-            out.push(f.clone());
-        }
-    }
-    out
 }
 
 fn resolve_output(cli: &RecordArgs, ts: &str) -> (PathBuf, String) {
@@ -234,14 +222,17 @@ fn resolve_output(cli: &RecordArgs, ts: &str) -> (PathBuf, String) {
 fn shell_join(parts: &[String]) -> String {
     parts
         .iter()
-        .map(|s| escape(OsStr::new(s)))
-        .map(|s| s.to_string())
+        .map(|s| shell_escape_str(s.as_str()))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
+fn shell_escape_str(s: &str) -> String {
+    shell_escape::escape(Cow::Borrowed(s)).to_string()
+}
+
 fn shell_escape_path(path: &Path) -> String {
-    escape(path.as_os_str()).to_string()
+    shell_escape::escape(path.as_os_str()).to_string()
 }
 
 fn require_tools_for_formats(formats: &[OutputFormat]) -> Result<()> {
@@ -255,6 +246,7 @@ fn require_tools_for_formats(formats: &[OutputFormat]) -> Result<()> {
     if formats.contains(&OutputFormat::Mp4) {
         require_tool("ffmpeg")?;
     }
+    require_asciinema_v3()?;
     Ok(())
 }
 
@@ -295,30 +287,83 @@ fn is_executable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(windows)]
-fn is_executable(path: &Path) -> bool {
-    std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+fn require_asciinema_v3() -> Result<()> {
+    let output = Command::new("asciinema")
+        .arg("--version")
+        .output()
+        .with_context(|| "failed to execute asciinema --version")?;
+    if !output.status.success() {
+        bail!("asciinema --version returned non-zero status");
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let version = stdout
+        .split_whitespace()
+        .find(|s| s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
+        .unwrap_or("");
+    let major = version.split('.').next().unwrap_or("0");
+    let major_num: u64 = major.parse().unwrap_or(0);
+    if major_num < 3 {
+        bail!("asciinema v3+ required (found {})", version);
+    }
+    Ok(())
 }
+
+fn geometry_args(cols: u16, rows: u16) -> [String; 4] {
+    [
+        "--cols".to_string(),
+        cols.to_string(),
+        "--rows".to_string(),
+        rows.to_string(),
+    ]
+}
+
+struct OutputPaths {
+    out_dir: PathBuf,
+    base_name: String,
+}
+
+impl OutputPaths {
+    fn new(out_dir: &Path, base_name: &str) -> Self {
+        Self {
+            out_dir: out_dir.to_path_buf(),
+            base_name: base_name.to_string(),
+        }
+    }
+
+    fn path(&self, format: OutputFormat) -> PathBuf {
+        self.out_dir
+            .join(format!("{}.{}", self.base_name, format.extension()))
+    }
+}
+
+impl OutputFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            OutputFormat::Cast => "cast",
+            OutputFormat::Txt => "txt",
+            OutputFormat::Raw => "raw.log",
+            OutputFormat::Gif => "gif",
+            OutputFormat::Mp4 => "mp4",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            OutputFormat::Cast => "cast",
+            OutputFormat::Txt => "text",
+            OutputFormat::Raw => "raw log",
+            OutputFormat::Gif => "gif",
+            OutputFormat::Mp4 => "mp4",
+        }
+    }
+}
+
+#[cfg(not(unix))]
+compile_error!("exec_and_record is only supported on Unix-like systems.");
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn normalize_formats_dedupes_preserves_order() {
-        let formats = vec![
-            OutputFormat::Mp4,
-            OutputFormat::Txt,
-            OutputFormat::Mp4,
-            OutputFormat::Gif,
-            OutputFormat::Txt,
-        ];
-        let out = normalize_formats(&formats);
-        assert_eq!(
-            out,
-            vec![OutputFormat::Mp4, OutputFormat::Txt, OutputFormat::Gif]
-        );
-    }
 
     #[test]
     fn resolve_output_uses_output_path() {
