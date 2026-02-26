@@ -42,6 +42,7 @@ Note: `.cast` is always produced by asciinema but is removed unless `--format ca
 - `--cols <n>`: terminal columns (default `120`)
 - `--rows <n>`: terminal rows (default `60`)
 - `--verbose`: show tool output and summary for debugging (default is quiet)
+- `--overwrite`: overwrite existing output files
 - `-- <cmd> [args...]`: command to exec and record
 
 ## Options (check)

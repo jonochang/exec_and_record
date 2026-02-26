@@ -60,6 +60,10 @@ struct RecordArgs {
     #[arg(long)]
     verbose: bool,
 
+    /// Overwrite existing output files
+    #[arg(long)]
+    overwrite: bool,
+
     /// Command to exec and record. Use `--` before the command.
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
@@ -115,6 +119,7 @@ fn record(args: RecordArgs) -> Result<()> {
     let outputs = OutputPaths::new(&out_dir, &base_name);
 
     let cmd_str = shell_join(&args.cmd);
+    prepare_output_files(&cast_file, &outputs, &formats, args.overwrite)?;
     let rec_cmd = if formats.contains(&OutputFormat::Raw) {
         let raw_path = shell_escape_path(outputs.path(OutputFormat::Raw).as_path());
         let cmd_arg = shell_escape_str(&cmd_str);
@@ -397,6 +402,15 @@ impl OutputPaths {
         self.out_dir
             .join(format!("{}.{}", self.base_name, format.extension()))
     }
+
+    fn all_paths(&self) -> Vec<PathBuf> {
+        vec![
+            self.path(OutputFormat::Txt),
+            self.path(OutputFormat::Raw),
+            self.path(OutputFormat::Gif),
+            self.path(OutputFormat::Mp4),
+        ]
+    }
 }
 
 impl OutputFormat {
@@ -424,6 +438,49 @@ impl OutputFormat {
 #[cfg(not(unix))]
 compile_error!("exec_and_record is only supported on Unix-like systems.");
 
+fn prepare_output_files(
+    cast_file: &Path,
+    outputs: &OutputPaths,
+    formats: &[OutputFormat],
+    overwrite: bool,
+) -> Result<()> {
+    let mut candidates = outputs.all_paths();
+    candidates.push(cast_file.to_path_buf());
+
+    let relevant: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|path| {
+            if path == cast_file {
+                return true;
+            }
+            match path.extension().and_then(|s| s.to_str()) {
+                Some("txt") => formats.contains(&OutputFormat::Txt),
+                Some("gif") => formats.contains(&OutputFormat::Gif) || formats.contains(&OutputFormat::Mp4),
+                Some("mp4") => formats.contains(&OutputFormat::Mp4),
+                Some("log") => formats.contains(&OutputFormat::Raw),
+                _ => false,
+            }
+        })
+        .collect();
+
+    let existing: Vec<PathBuf> = relevant
+        .into_iter()
+        .filter(|path| path.exists())
+        .collect();
+
+    if !existing.is_empty() && !overwrite {
+        bail!("output file exists, use --overwrite to replace");
+    }
+
+    if overwrite {
+        for path in existing {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,6 +495,7 @@ mod tests {
             rows: 60,
             format: vec![OutputFormat::Mp4],
             verbose: false,
+            overwrite: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
@@ -455,6 +513,7 @@ mod tests {
             rows: 60,
             format: vec![OutputFormat::Mp4],
             verbose: false,
+            overwrite: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
@@ -472,6 +531,7 @@ mod tests {
             rows: 60,
             format: vec![OutputFormat::Mp4],
             verbose: false,
+            overwrite: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
