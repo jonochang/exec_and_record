@@ -17,18 +17,20 @@ exec_and_record record -- codex
 exec_and_record record --output ./recordings/session_20260101_120000.mp4 --format mp4,txt -- claude
 exec_and_record record --cols 120 --rows 60 --format mp4 -- gemini
 exec_and_record check --format mp4,txt
-exec_and_record version
+exec_and_record --version
 ```
 
 Outputs go to `./recordings/session_YYYYMMDD_HHMMSS.{mp4|cast|...}` by default, or you can
 use `--output` to set a single output path (directory + base name derived from the path).
 `--output` conflicts with `--out-dir` and `--name`.
 
+Note: `.cast` is always produced by asciinema but is removed unless `--format cast` is requested.
+
 ## Commands
 
 - `record`: run and record a command (default workflow)
 - `check`: verify tool availability for requested formats
-- `version`: print version
+- `--version`: print version (built-in clap flag)
 
 ## Options (record)
 
@@ -38,11 +40,16 @@ use `--output` to set a single output path (directory + base name derived from t
 - `--format <list>`: comma-separated list (default `mp4`)
 - `--cols <n>`: terminal columns (default `120`)
 - `--rows <n>`: terminal rows (default `60`)
+- `--quiet`: suppress summary output
 - `-- <cmd> [args...]`: command to exec and record
 
 ## Options (check)
 
 - `--format <list>`: comma-separated list (default `mp4`)
+
+## Platform
+
+Unix-only. The pipeline depends on `asciinema`, `agg`, `ffmpeg`, and optionally `script`.
 
 ## Output Formats
 
@@ -55,5 +62,13 @@ use `--output` to set a single output path (directory + base name derived from t
 ## Build
 
 ```bash
+cargo build --release
+```
+
+## Nix
+
+```bash
+nix develop
+cargo generate-lockfile
 cargo build --release
 ```
