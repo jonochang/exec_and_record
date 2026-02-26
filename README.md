@@ -55,6 +55,12 @@ Note: `.cast` is always produced by asciinema but is removed unless `--format ca
 
 Unix-only. The pipeline depends on `asciinema`, `agg`, `ffmpeg`, and optionally `script`.
 
+## TTY Notes
+
+The recorder needs a real TTY for interactive sessions. If stdin/stdout are not a TTY, the tool
+auto-enables `--exit-after` and prints a warning. Run inside an interactive terminal (or `tmux`)
+for fully interactive recordings.
+
 ## Output Formats
 
 - `mp4` (default)

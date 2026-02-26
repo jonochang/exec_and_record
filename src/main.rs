@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
 use anyhow::{bail, Context, Result};
+use atty::Stream;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use chrono::Local;
 
@@ -117,6 +118,16 @@ fn record(args: RecordArgs) -> Result<()> {
 
     let formats = args.format.clone();
     let quiet = !args.verbose;
+    let mut exit_after = args.exit_after;
+
+    if !is_interactive_tty() {
+        if !exit_after {
+            eprintln!(
+                "Non-interactive terminal detected; auto-enabling --exit-after. Run in a real TTY for interactive sessions."
+            );
+            exit_after = true;
+        }
+    }
     require_tools_for_formats(&formats)?;
 
     let cast_file = out_dir.join(format!("{}.{}", base_name, OutputFormat::Cast.extension()));
@@ -125,7 +136,7 @@ fn record(args: RecordArgs) -> Result<()> {
     let cmd_str = shell_join(&args.cmd);
     prepare_output_files(&cast_file, &outputs, &formats, args.overwrite)?;
     let display_cmd = format!("$ {}", args.cmd.join(" "));
-    let rec_cmd = build_record_command(&cmd_str, &display_cmd, args.exit_after);
+    let rec_cmd = build_record_command(&cmd_str, &display_cmd, exit_after);
     let rec_cmd = if formats.contains(&OutputFormat::Raw) {
         let raw_path = shell_escape_path(outputs.path(OutputFormat::Raw).as_path());
         let cmd_arg = shell_escape_str(&rec_cmd);
@@ -273,6 +284,10 @@ fn shell_escape_str(s: &str) -> String {
 
 fn shell_escape_path(path: &Path) -> String {
     shell_escape::escape(path.to_string_lossy()).to_string()
+}
+
+fn is_interactive_tty() -> bool {
+    atty::is(Stream::Stdin) && atty::is(Stream::Stdout)
 }
 
 fn build_record_command(cmd: &str, display_cmd: &str, exit_after: bool) -> String {
