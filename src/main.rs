@@ -1,20 +1,20 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use chrono::Local;
-use shell_escape::escape;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Cli {
     #[command(subcommand)]
-    command: Subcommand,
+    command: CliCommand,
 }
 
 #[derive(Subcommand, Debug)]
-enum Subcommand {
+enum CliCommand {
     /// Record an interactive command
     Record(RecordArgs),
     /// Check dependencies for requested output formats
@@ -43,17 +43,17 @@ struct RecordArgs {
     name: Option<String>,
 
     /// Terminal columns
-    #[arg(long, default_value_t = 120)]
+    #[arg(long, default_value_t = DEFAULT_COLS)]
     cols: u16,
 
     /// Terminal rows
-    #[arg(long, default_value_t = 60)]
+    #[arg(long, default_value_t = DEFAULT_ROWS)]
     rows: u16,
 
     /// Output formats (comma-separated). Default: mp4
     ///
     /// Supported values: cast, txt, raw, gif, mp4.
-    #[arg(long, value_delimiter = ',', default_value = "mp4")]
+    #[arg(long, value_delimiter = ',', default_value = DEFAULT_FORMATS)]
     format: Vec<OutputFormat>,
 
     /// Suppress summary output
@@ -70,11 +70,15 @@ struct CheckArgs {
     /// Output formats to validate (comma-separated). Default: mp4
     ///
     /// Supported values: cast, txt, raw, gif, mp4.
-    #[arg(long, value_delimiter = ',', default_value = "mp4")]
+    #[arg(long, value_delimiter = ',', default_value = DEFAULT_FORMATS)]
     format: Vec<OutputFormat>,
+
+    /// Print dependency versions and default settings
+    #[arg(long)]
+    verbose: bool,
 }
 
-#[derive(Clone, Debug, ValueEnum, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq, Hash)]
 enum OutputFormat {
     Cast,
     Txt,
@@ -83,12 +87,17 @@ enum OutputFormat {
     Mp4,
 }
 
+const DEFAULT_COLS: u16 = 120;
+const DEFAULT_ROWS: u16 = 60;
+const DEFAULT_FORMATS: &str = "mp4";
+const DEFAULT_OUT_DIR: &str = "recordings";
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Subcommand::Record(args) => record(args),
-        Subcommand::Check(args) => check(args),
+        CliCommand::Record(args) => record(args),
+        CliCommand::Check(args) => check(args),
     }
 }
 
@@ -151,6 +160,8 @@ fn record(args: RecordArgs) -> Result<()> {
                 .arg("-y")
                 .arg("-i")
                 .arg(outputs.path(OutputFormat::Gif))
+                .arg("-vf")
+                .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
                 .arg("-movflags")
                 .arg("faststart")
                 .arg("-pix_fmt")
@@ -192,6 +203,10 @@ fn record(args: RecordArgs) -> Result<()> {
 fn check(args: CheckArgs) -> Result<()> {
     let formats = args.format.clone();
     require_tools_for_formats(&formats)?;
+    if args.verbose {
+        print_versions(&formats)?;
+        print_defaults();
+    }
     println!("OK");
     Ok(())
 }
@@ -211,7 +226,7 @@ fn resolve_output(cli: &RecordArgs, ts: &str) -> (PathBuf, String) {
     let out_dir = cli
         .out_dir
         .clone()
-        .unwrap_or_else(|| PathBuf::from("recordings"));
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT_DIR));
     let base_name = cli
         .name
         .clone()
@@ -232,7 +247,7 @@ fn shell_escape_str(s: &str) -> String {
 }
 
 fn shell_escape_path(path: &Path) -> String {
-    shell_escape::escape(path.as_os_str()).to_string()
+    shell_escape::escape(path.to_string_lossy()).to_string()
 }
 
 fn require_tools_for_formats(formats: &[OutputFormat]) -> Result<()> {
@@ -246,7 +261,9 @@ fn require_tools_for_formats(formats: &[OutputFormat]) -> Result<()> {
     if formats.contains(&OutputFormat::Mp4) {
         require_tool("ffmpeg")?;
     }
-    require_asciinema_v3()?;
+    if formats.contains(&OutputFormat::Txt) {
+        require_asciinema_convert()?;
+    }
     Ok(())
 }
 
@@ -287,25 +304,57 @@ fn is_executable(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn require_asciinema_v3() -> Result<()> {
-    let output = Command::new("asciinema")
-        .arg("--version")
-        .output()
-        .with_context(|| "failed to execute asciinema --version")?;
-    if !output.status.success() {
-        bail!("asciinema --version returned non-zero status");
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let version = stdout
-        .split_whitespace()
-        .find(|s| s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
-        .unwrap_or("");
-    let major = version.split('.').next().unwrap_or("0");
-    let major_num: u64 = major.parse().unwrap_or(0);
-    if major_num < 3 {
-        bail!("asciinema v3+ required (found {})", version);
+fn require_asciinema_convert() -> Result<()> {
+    let status = Command::new("asciinema")
+        .arg("convert")
+        .arg("--help")
+        .status()
+        .with_context(|| "failed to execute asciinema convert --help")?;
+    if !status.success() {
+        bail!("asciinema convert not available in this version");
     }
     Ok(())
+}
+
+fn print_versions(formats: &[OutputFormat]) -> Result<()> {
+    println!("Dependencies:");
+    println!("- asciinema: {}", tool_version("asciinema", &["--version"])?);
+    if formats.contains(&OutputFormat::Gif) || formats.contains(&OutputFormat::Mp4) {
+        println!("- agg: {}", tool_version("agg", &["--version"])?);
+    }
+    if formats.contains(&OutputFormat::Mp4) {
+        println!("- ffmpeg: {}", tool_version("ffmpeg", &["-version"])?);
+    }
+    if formats.contains(&OutputFormat::Raw) {
+        println!("- script: {}", tool_version("script", &["--version"])?);
+    }
+    Ok(())
+}
+
+fn tool_version(tool: &str, args: &[&str]) -> Result<String> {
+    let output = Command::new(tool)
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to execute {tool}"))?;
+    if !output.status.success() {
+        return Ok("unknown".to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next().unwrap_or("").trim();
+    if line.is_empty() {
+        Ok("unknown".to_string())
+    } else {
+        Ok(line.to_string())
+    }
+}
+
+fn print_defaults() {
+    println!("Defaults:");
+    println!("- cols: {}", DEFAULT_COLS);
+    println!("- rows: {}", DEFAULT_ROWS);
+    println!("- formats: {}", DEFAULT_FORMATS);
+    println!("- out_dir: {}", DEFAULT_OUT_DIR);
+    println!("- name: session_YYYYMMDD_HHMMSS");
 }
 
 fn geometry_args(cols: u16, rows: u16) -> [String; 4] {

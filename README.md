@@ -17,6 +17,7 @@ exec_and_record record -- codex
 exec_and_record record --output ./recordings/session_20260101_120000.mp4 --format mp4,txt -- claude
 exec_and_record record --cols 120 --rows 60 --format mp4 -- gemini
 exec_and_record check --format mp4,txt
+exec_and_record check --format mp4,txt --verbose
 exec_and_record --version
 ```
 
@@ -46,6 +47,7 @@ Note: `.cast` is always produced by asciinema but is removed unless `--format ca
 ## Options (check)
 
 - `--format <list>`: comma-separated list (default `mp4`)
+- `--verbose`: print dependency versions and default settings
 
 ## Platform
 
