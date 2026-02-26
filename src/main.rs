@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use std::process::{Command, ExitStatus, Stdio};
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -56,7 +56,7 @@ struct RecordArgs {
     #[arg(long, value_delimiter = ',', default_value = DEFAULT_FORMATS)]
     format: Vec<OutputFormat>,
 
-    /// Suppress summary output
+    /// Suppress summary output and reduce tool verbosity
     #[arg(long)]
     quiet: bool,
 
@@ -122,53 +122,66 @@ fn record(args: RecordArgs) -> Result<()> {
         cmd_str
     };
 
-    run_status(
-        Command::new("asciinema")
-            .arg("rec")
-            .args(geometry_args(args.cols, args.rows))
-            .arg("-c")
-            .arg(rec_cmd)
-            .arg(&cast_file),
-        "asciinema rec",
-    )?;
+    let mut asciinema_cmd = Command::new("asciinema");
+    asciinema_cmd
+        .arg("rec")
+        .args(geometry_args(args.cols, args.rows))
+        .arg("-c")
+        .arg(rec_cmd)
+        .arg(&cast_file);
+    if args.quiet {
+        asciinema_cmd.arg("-q");
+    }
+    run_status(&mut asciinema_cmd, "asciinema rec")?;
 
     if formats.contains(&OutputFormat::Txt) {
-        run_status(
-            Command::new("asciinema")
-                .arg("convert")
-                .arg("-f")
-                .arg("txt")
-                .arg(&cast_file)
-                .arg(outputs.path(OutputFormat::Txt)),
-            "asciinema convert txt",
-        )?;
+        let mut convert_cmd = Command::new("asciinema");
+        convert_cmd
+            .arg("convert")
+            .arg("-f")
+            .arg("txt")
+            .arg(&cast_file)
+            .arg(outputs.path(OutputFormat::Txt));
+        if args.quiet {
+            convert_cmd.arg("-q");
+            convert_cmd.stdout(Stdio::null());
+        }
+        run_status(&mut convert_cmd, "asciinema convert txt")?;
     }
 
     if formats.contains(&OutputFormat::Gif) || formats.contains(&OutputFormat::Mp4) {
-        run_status(
-            Command::new("agg")
-                .args(geometry_args(args.cols, args.rows))
-                .arg(&cast_file)
-                .arg(outputs.path(OutputFormat::Gif)),
-            "agg",
-        )?;
+        let mut agg_cmd = Command::new("agg");
+        agg_cmd
+            .args(geometry_args(args.cols, args.rows))
+            .arg(&cast_file)
+            .arg(outputs.path(OutputFormat::Gif));
+        if args.quiet {
+            agg_cmd.stdout(Stdio::null());
+        }
+        run_status(&mut agg_cmd, "agg")?;
     }
 
     if formats.contains(&OutputFormat::Mp4) {
-        run_status(
-            Command::new("ffmpeg")
-                .arg("-y")
-                .arg("-i")
-                .arg(outputs.path(OutputFormat::Gif))
-                .arg("-vf")
-                .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
-                .arg("-movflags")
-                .arg("faststart")
-                .arg("-pix_fmt")
-                .arg("yuv420p")
-                .arg(outputs.path(OutputFormat::Mp4)),
-            "ffmpeg",
-        )?;
+        let mut ffmpeg_cmd = Command::new("ffmpeg");
+        ffmpeg_cmd
+            .arg("-y")
+            .arg("-i")
+            .arg(outputs.path(OutputFormat::Gif))
+            .arg("-vf")
+            .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
+            .arg("-movflags")
+            .arg("faststart")
+            .arg("-pix_fmt")
+            .arg("yuv420p")
+            .arg(outputs.path(OutputFormat::Mp4));
+        if args.quiet {
+            ffmpeg_cmd
+                .arg("-hide_banner")
+                .arg("-loglevel")
+                .arg("error")
+                .arg("-nostats");
+        }
+        run_status(&mut ffmpeg_cmd, "ffmpeg")?;
     }
 
     if !formats.contains(&OutputFormat::Gif) && formats.contains(&OutputFormat::Mp4) {
