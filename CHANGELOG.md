@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Auto-detect non-interactive terminals and default to `--exit-after`.
+- Add TTY guidance in docs.
+- Add `--verbose`/quiet behavior to reduce tool noise by default.
+
 ## 0.2.1
 
 - Default to quiet output; `--verbose` restores tool output and summary.
