@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Default to quiet output; `--verbose` restores tool output and summary.
+- Add `--overwrite` to replace existing outputs.
+- Echo command as the first line in the recording and keep an interactive shell open by default.
+- Add `--exit-after` to end the session after the command finishes.
+
 ## 0.2.0
 
 - Add Nix flake and package definitions for `nix profile add` installs.
