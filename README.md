@@ -41,7 +41,7 @@ Note: `.cast` is always produced by asciinema but is removed unless `--format ca
 - `--format <list>`: comma-separated list (default `mp4`)
 - `--cols <n>`: terminal columns (default `120`)
 - `--rows <n>`: terminal rows (default `60`)
-- `--quiet`: suppress summary output and reduce tool verbosity
+- `--verbose`: show tool output and summary for debugging (default is quiet)
 - `-- <cmd> [args...]`: command to exec and record
 
 ## Options (check)

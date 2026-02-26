@@ -56,9 +56,9 @@ struct RecordArgs {
     #[arg(long, value_delimiter = ',', default_value = DEFAULT_FORMATS)]
     format: Vec<OutputFormat>,
 
-    /// Suppress summary output and reduce tool verbosity
+    /// Show tool output and summary for debugging
     #[arg(long)]
-    quiet: bool,
+    verbose: bool,
 
     /// Command to exec and record. Use `--` before the command.
     #[arg(last = true, required = true)]
@@ -108,6 +108,7 @@ fn record(args: RecordArgs) -> Result<()> {
         .with_context(|| format!("create out dir {}", out_dir.display()))?;
 
     let formats = args.format.clone();
+    let quiet = !args.verbose;
     require_tools_for_formats(&formats)?;
 
     let cast_file = out_dir.join(format!("{}.{}", base_name, OutputFormat::Cast.extension()));
@@ -129,7 +130,7 @@ fn record(args: RecordArgs) -> Result<()> {
         .arg("-c")
         .arg(rec_cmd)
         .arg(&cast_file);
-    if args.quiet {
+    if quiet {
         asciinema_cmd.arg("-q");
     }
     run_status(&mut asciinema_cmd, "asciinema rec")?;
@@ -142,7 +143,7 @@ fn record(args: RecordArgs) -> Result<()> {
             .arg("txt")
             .arg(&cast_file)
             .arg(outputs.path(OutputFormat::Txt));
-        if args.quiet {
+        if quiet {
             convert_cmd.arg("-q");
             convert_cmd.stdout(Stdio::null());
         }
@@ -155,7 +156,7 @@ fn record(args: RecordArgs) -> Result<()> {
             .args(geometry_args(args.cols, args.rows))
             .arg(&cast_file)
             .arg(outputs.path(OutputFormat::Gif));
-        if args.quiet {
+        if quiet {
             agg_cmd.stdout(Stdio::null());
         }
         run_status(&mut agg_cmd, "agg")?;
@@ -174,7 +175,7 @@ fn record(args: RecordArgs) -> Result<()> {
             .arg("-pix_fmt")
             .arg("yuv420p")
             .arg(outputs.path(OutputFormat::Mp4));
-        if args.quiet {
+        if quiet {
             ffmpeg_cmd
                 .arg("-hide_banner")
                 .arg("-loglevel")
@@ -191,7 +192,7 @@ fn record(args: RecordArgs) -> Result<()> {
         let _ = std::fs::remove_file(&cast_file);
     }
 
-    if !args.quiet {
+    if !quiet {
         eprintln!("Done:");
         let mut printed = std::collections::HashSet::new();
         for format in &formats {
@@ -436,7 +437,7 @@ mod tests {
             cols: 120,
             rows: 60,
             format: vec![OutputFormat::Mp4],
-            quiet: false,
+            verbose: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
@@ -453,7 +454,7 @@ mod tests {
             cols: 120,
             rows: 60,
             format: vec![OutputFormat::Mp4],
-            quiet: false,
+            verbose: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
@@ -470,7 +471,7 @@ mod tests {
             cols: 120,
             rows: 60,
             format: vec![OutputFormat::Mp4],
-            quiet: false,
+            verbose: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
