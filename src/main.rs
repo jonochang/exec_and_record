@@ -64,6 +64,10 @@ struct RecordArgs {
     #[arg(long)]
     overwrite: bool,
 
+    /// Exit immediately after running the command (default keeps an interactive shell open)
+    #[arg(long)]
+    exit_after: bool,
+
     /// Command to exec and record. Use `--` before the command.
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
@@ -120,12 +124,14 @@ fn record(args: RecordArgs) -> Result<()> {
 
     let cmd_str = shell_join(&args.cmd);
     prepare_output_files(&cast_file, &outputs, &formats, args.overwrite)?;
+    let display_cmd = format!("$ {}", args.cmd.join(" "));
+    let rec_cmd = build_record_command(&cmd_str, &display_cmd, args.exit_after);
     let rec_cmd = if formats.contains(&OutputFormat::Raw) {
         let raw_path = shell_escape_path(outputs.path(OutputFormat::Raw).as_path());
-        let cmd_arg = shell_escape_str(&cmd_str);
+        let cmd_arg = shell_escape_str(&rec_cmd);
         format!("script -q -f -c {} {}", cmd_arg, raw_path)
     } else {
-        cmd_str
+        rec_cmd
     };
 
     let mut asciinema_cmd = Command::new("asciinema");
@@ -267,6 +273,18 @@ fn shell_escape_str(s: &str) -> String {
 
 fn shell_escape_path(path: &Path) -> String {
     shell_escape::escape(path.to_string_lossy()).to_string()
+}
+
+fn build_record_command(cmd: &str, display_cmd: &str, exit_after: bool) -> String {
+    let mut script = String::new();
+    script.push_str("printf '%s\\n' ");
+    script.push_str(&shell_escape_str(display_cmd));
+    script.push_str("; ");
+    script.push_str(cmd);
+    if !exit_after {
+        script.push_str("; exec \"$SHELL\"");
+    }
+    format!("sh -lc {}", shell_escape_str(&script))
 }
 
 fn require_tools_for_formats(formats: &[OutputFormat]) -> Result<()> {
@@ -496,6 +514,7 @@ mod tests {
             format: vec![OutputFormat::Mp4],
             verbose: false,
             overwrite: false,
+            exit_after: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
@@ -514,6 +533,7 @@ mod tests {
             format: vec![OutputFormat::Mp4],
             verbose: false,
             overwrite: false,
+            exit_after: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
@@ -532,6 +552,7 @@ mod tests {
             format: vec![OutputFormat::Mp4],
             verbose: false,
             overwrite: false,
+            exit_after: false,
             cmd: vec!["echo".to_string(), "hi".to_string()],
         };
         let (dir, base) = resolve_output(&args, "20250101_000000");
